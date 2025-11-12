@@ -2,8 +2,10 @@
 
 import aiohttp
 import logging
+import re
 from typing import List, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +26,16 @@ class EarningsTranscriptFetcher:
         if self.session:
             await self.session.close()
 
-    async def fetch_seeking_alpha(self, ticker: str) -> List[Dict]:
+    async def fetch_seeking_alpha(self, ticker: str, max_transcripts: int = 8) -> List[Dict]:
         """
-        Fetch earnings transcripts from SeekingAlpha.
+        Fetch earnings transcripts from SeekingAlpha using their public API.
 
-        Note: This requires proper authentication/scraping approach
+        Args:
+            ticker: Stock ticker symbol
+            max_transcripts: Maximum number of transcripts to fetch (default: 8, covers 2 years)
+
+        Returns:
+            List of transcript dictionaries
         """
         if not self.session:
             self.session = aiohttp.ClientSession()
@@ -36,22 +43,169 @@ class EarningsTranscriptFetcher:
         transcripts = []
 
         try:
-            # SeekingAlpha earnings transcripts endpoint pattern
-            # This is a placeholder - real implementation would need to handle
-            # proper authentication and page scraping
+            # SeekingAlpha API endpoint for earnings transcripts
+            # Note: This is a simplified version - actual implementation may need API key
+            url = f"https://seekingalpha.com/api/v3/symbols/{ticker}/transcripts"
 
-            logger.info(f"Fetching SeekingAlpha transcripts for {ticker}")
-            # Implementation would go here
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+
+            async with self.session.get(
+                url,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+
+                    # Parse the response
+                    items = data.get('data', [])[:max_transcripts]
+
+                    for item in items:
+                        attributes = item.get('attributes', {})
+
+                        # Fetch full transcript content
+                        transcript_id = item.get('id')
+                        content = await self._fetch_seeking_alpha_content(ticker, transcript_id)
+
+                        transcripts.append({
+                            'id': transcript_id,
+                            'title': attributes.get('title'),
+                            'date': datetime.fromisoformat(attributes.get('publishedOn', '').replace('Z', '+00:00')),
+                            'content': content,
+                            'source': 'SeekingAlpha',
+                            'url': f"https://seekingalpha.com/article/{transcript_id}"
+                        })
+
+                    logger.info(f"Fetched {len(transcripts)} transcripts from SeekingAlpha for {ticker}")
+                else:
+                    logger.warning(f"SeekingAlpha returned status {response.status} for {ticker}")
 
         except Exception as e:
             logger.error(f"Error fetching SeekingAlpha transcripts: {e}")
 
         return transcripts
 
-    async def fetch_motley_fool(self, ticker: str) -> List[Dict]:
-        """Fetch transcripts from Motley Fool."""
-        # Placeholder for future implementation
-        return []
+    async def _fetch_seeking_alpha_content(self, ticker: str, transcript_id: str) -> str:
+        """Fetch full transcript content from SeekingAlpha."""
+        try:
+            url = f"https://seekingalpha.com/article/{transcript_id}"
+
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+
+            async with self.session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status == 200:
+                    html = await response.text()
+                    soup = BeautifulSoup(html, 'html.parser')
+
+                    # Extract transcript content (SeekingAlpha specific selectors)
+                    content_div = soup.find('div', {'data-test-id': 'content-container'})
+                    if content_div:
+                        return content_div.get_text(separator='\n', strip=True)
+
+        except Exception as e:
+            logger.debug(f"Could not fetch content for {transcript_id}: {e}")
+
+        return ""
+
+    async def fetch_motley_fool(self, ticker: str, max_transcripts: int = 8) -> List[Dict]:
+        """
+        Fetch transcripts from Motley Fool earnings transcripts.
+
+        Args:
+            ticker: Stock ticker symbol
+            max_transcripts: Maximum transcripts to fetch
+
+        Returns:
+            List of transcript dictionaries
+        """
+        if not self.session:
+            self.session = aiohttp.ClientSession()
+
+        transcripts = []
+
+        try:
+            # Motley Fool transcript search URL
+            url = f"https://www.fool.com/quote/{ticker.lower()}/earnings-call-transcripts/"
+
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+
+            async with self.session.get(
+                url,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                if response.status == 200:
+                    html = await response.text()
+                    soup = BeautifulSoup(html, 'html.parser')
+
+                    # Find transcript links
+                    transcript_links = soup.find_all('a', href=re.compile(r'/earnings/call-transcript/'))
+
+                    for link in transcript_links[:max_transcripts]:
+                        transcript_url = link.get('href')
+                        if not transcript_url.startswith('http'):
+                            transcript_url = f"https://www.fool.com{transcript_url}"
+
+                        # Extract title and date
+                        title = link.get_text(strip=True)
+
+                        # Fetch full content
+                        content = await self._fetch_motley_fool_content(transcript_url)
+
+                        # Parse date from title or URL
+                        date_match = re.search(r'(\d{4})-q(\d)', transcript_url.lower())
+                        if date_match:
+                            year = int(date_match.group(1))
+                            quarter = int(date_match.group(2))
+                            # Estimate date based on quarter
+                            month = (quarter - 1) * 3 + 2  # Middle of quarter
+                            date = datetime(year, month, 15)
+                        else:
+                            date = datetime.now()
+
+                        transcripts.append({
+                            'id': transcript_url,
+                            'title': title,
+                            'date': date,
+                            'content': content,
+                            'source': 'Motley Fool',
+                            'url': transcript_url
+                        })
+
+                    logger.info(f"Fetched {len(transcripts)} transcripts from Motley Fool for {ticker}")
+
+        except Exception as e:
+            logger.error(f"Error fetching Motley Fool transcripts: {e}")
+
+        return transcripts
+
+    async def _fetch_motley_fool_content(self, url: str) -> str:
+        """Fetch full transcript content from Motley Fool."""
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+
+            async with self.session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status == 200:
+                    html = await response.text()
+                    soup = BeautifulSoup(html, 'html.parser')
+
+                    # Extract main content
+                    article = soup.find('article') or soup.find('div', class_='article-content')
+                    if article:
+                        return article.get_text(separator='\n', strip=True)
+
+        except Exception as e:
+            logger.debug(f"Could not fetch Motley Fool content: {e}")
+
+        return ""
 
     async def fetch_investor_relations(self, company_website: str) -> List[Dict]:
         """
@@ -97,51 +251,59 @@ class EarningsTranscriptFetcher:
         return transcripts
 
 async def fetch_all_company_transcripts(
-    session,
-    company_id: int,
     ticker: str,
-    website: Optional[str] = None,
-    max_quarters: int = 12
+    max_transcripts: int = 8,
+    website: Optional[str] = None
 ) -> List[Dict]:
     """
     Fetch transcripts from all available sources for a company.
 
     Args:
-        session: SQLAlchemy async session
-        company_id: Database company ID
         ticker: Company ticker symbol
+        max_transcripts: Maximum transcripts to fetch (default 8 = ~2 years)
         website: Company website URL
-        max_quarters: Maximum quarters to fetch
 
     Returns:
-        List of transcript dictionaries.
+        List of transcript dictionaries with 'title', 'date', 'content', 'source', 'url'
     """
-    from app.integrations.sec_edgar import fetch_company_transcripts as fetch_sec_transcripts
-
     all_transcripts = []
 
-    # Fetch from SEC EDGAR
-    try:
-        # Note: This would need CIK lookup first
-        logger.info(f"Fetching transcripts from SEC EDGAR for {ticker}")
-        # sec_transcripts = await fetch_sec_transcripts(session, cik, company_id, max_quarters)
-        # all_transcripts.extend(sec_transcripts)
-    except Exception as e:
-        logger.error(f"Error fetching SEC transcripts: {e}")
-
-    # Fetch from other providers
+    # Fetch from multiple providers
     async with EarningsTranscriptFetcher() as fetcher:
+        # Try SeekingAlpha first (most comprehensive)
         try:
-            seeking_alpha = await fetcher.fetch_seeking_alpha(ticker)
+            logger.info(f"Fetching SeekingAlpha transcripts for {ticker}")
+            seeking_alpha = await fetcher.fetch_seeking_alpha(ticker, max_transcripts)
             all_transcripts.extend(seeking_alpha)
         except Exception as e:
             logger.error(f"Error fetching SeekingAlpha: {e}")
 
-        if website:
+        # If we need more, try Motley Fool
+        if len(all_transcripts) < max_transcripts:
             try:
+                logger.info(f"Fetching Motley Fool transcripts for {ticker}")
+                motley = await fetcher.fetch_motley_fool(ticker, max_transcripts - len(all_transcripts))
+                all_transcripts.extend(motley)
+            except Exception as e:
+                logger.error(f"Error fetching Motley Fool: {e}")
+
+        # Try investor relations page if provided
+        if website and len(all_transcripts) < max_transcripts:
+            try:
+                logger.info(f"Fetching IR transcripts for {ticker}")
                 ir_transcripts = await fetcher.fetch_investor_relations(website)
-                all_transcripts.extend(ir_transcripts)
+                all_transcripts.extend(ir_transcripts[:max_transcripts - len(all_transcripts)])
             except Exception as e:
                 logger.error(f"Error fetching IR transcripts: {e}")
+
+    # Sort by date (most recent first) and limit
+    all_transcripts.sort(key=lambda x: x.get('date', datetime.min), reverse=True)
+    all_transcripts = all_transcripts[:max_transcripts]
+
+    # Filter to last 2 years
+    two_years_ago = datetime.now() - timedelta(days=730)
+    all_transcripts = [t for t in all_transcripts if t.get('date', datetime.min) > two_years_ago]
+
+    logger.info(f"Total transcripts fetched for {ticker}: {len(all_transcripts)}")
 
     return all_transcripts

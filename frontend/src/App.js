@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import './App.css';
 import Dashboard from './pages/Dashboard';
+import StockAnalysis from './pages/StockAnalysis';
 import Navigation from './components/Navigation';
 import { useStore } from './store/store';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState('dashboard');
+  const [currentPage, setCurrentPage] = useState('stock-analysis');
   const { loading, error } = useStore();
 
   return (
@@ -22,6 +23,7 @@ function App() {
             <p>Loading...</p>
           </div>
         )}
+        {currentPage === 'stock-analysis' && <StockAnalysis />}
         {currentPage === 'dashboard' && <Dashboard />}
       </main>
     </div>

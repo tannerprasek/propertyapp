@@ -11,6 +11,14 @@ function Navigation({ currentPage, setCurrentPage }) {
         <ul className="nav-menu">
           <li>
             <button
+              className={`nav-link ${currentPage === 'stock-analysis' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('stock-analysis')}
+            >
+              Stock Analysis
+            </button>
+          </li>
+          <li>
+            <button
               className={`nav-link ${currentPage === 'dashboard' ? 'active' : ''}`}
               onClick={() => setCurrentPage('dashboard')}
             >

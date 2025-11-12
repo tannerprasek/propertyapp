@@ -55,3 +55,79 @@ async def sync_polymarket_markets():
         "status": "syncing",
         "message": "Polymarket markets sync started"
     }
+
+@router.get("/search/{ticker}")
+async def search_markets_by_ticker(
+    ticker: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Search for Polymarket markets related to a stock ticker.
+    Focuses on earnings call 'mentions' markets.
+    """
+    from app.integrations.polymarket import PolymarketAPI
+    import re
+
+    ticker = ticker.upper()
+
+    # First, try to find markets in our database
+    stmt = select(PolymarketMarket).where(
+        PolymarketMarket.companies.contains([ticker])
+    )
+    result = await session.execute(stmt)
+    db_markets = result.scalars().all()
+
+    # Also fetch fresh data from Polymarket API
+    async with PolymarketAPI() as api:
+        all_markets = await api.get_markets()
+
+        # Filter for earnings-related markets mentioning this ticker
+        earnings_keywords = [
+            'earnings', 'call', 'mention', 'mentions', 'say', 'says',
+            'transcript', 'conference', 'quarterly', 'Q1', 'Q2', 'Q3', 'Q4'
+        ]
+
+        relevant_markets = []
+        for market in all_markets:
+            title = market.get('title', '').lower()
+            description = market.get('description', '').lower()
+
+            # Check if ticker is mentioned
+            if ticker.lower() not in title and ticker.lower() not in description:
+                continue
+
+            # Check if it's earnings-related
+            is_earnings = any(keyword in title or keyword in description
+                            for keyword in earnings_keywords)
+
+            if is_earnings:
+                # Extract keywords from the market
+                keywords = api.extract_keywords(market)
+
+                # Parse probabilities
+                prices = market.get('prices', [])
+                yes_prob = 0.5
+                no_prob = 0.5
+
+                if len(prices) >= 2:
+                    yes_prob = float(prices[0].get('prob', 0.5))
+                    no_prob = float(prices[1].get('prob', 0.5))
+
+                relevant_markets.append({
+                    'market_id': market.get('id'),
+                    'title': market.get('title'),
+                    'description': market.get('description'),
+                    'category': market.get('category', 'earnings'),
+                    'current_yes_probability': yes_prob,
+                    'current_no_probability': no_prob,
+                    'volume': float(market.get('volume', 0)),
+                    'liquidity': float(market.get('liquidity', 0)),
+                    'keywords': keywords,
+                    'end_date': market.get('endDate'),
+                })
+
+    return {
+        'ticker': ticker,
+        'markets': relevant_markets,
+        'count': len(relevant_markets)
+    }

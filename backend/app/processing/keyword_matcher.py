@@ -139,6 +139,77 @@ class KeywordMatcher:
         sorted_mentions = sorted(mentions, key=lambda x: x['confidence'], reverse=True)
         return sorted_mentions[:max_mentions]
 
+    def find_keywords(self, text: str, keywords: List[str]) -> List[Dict]:
+        """
+        Find all keywords in text and return mentions with context.
+
+        Args:
+            text: Text to search
+            keywords: List of keywords to find
+
+        Returns:
+            List of mention dictionaries with keyword, context, confidence
+        """
+        mentions = []
+
+        for keyword in keywords:
+            matches = self._find_keyword_matches(text, keyword)
+
+            for match in matches:
+                start, end = match
+                confidence = self._calculate_confidence(text, keyword, match)
+
+                # Extract context around the keyword
+                context_start = max(0, start - 100)
+                context_end = min(len(text), end + 100)
+                context = text[context_start:context_end]
+
+                mentions.append({
+                    'keyword': keyword,
+                    'position_start': start,
+                    'position_end': end,
+                    'context': context,
+                    'confidence': confidence
+                })
+
+        return mentions
+
+    def analyze_sentiment(self, context: str) -> str:
+        """
+        Analyze sentiment of a text context.
+
+        Args:
+            context: Text to analyze
+
+        Returns:
+            Sentiment: 'positive', 'negative', or 'neutral'
+        """
+        context_lower = context.lower()
+
+        # Positive indicators
+        positive_words = [
+            'good', 'great', 'excellent', 'strong', 'positive', 'growth', 'increase',
+            'improve', 'success', 'profitable', 'optimistic', 'confident', 'bullish',
+            'excited', 'pleased', 'happy', 'better', 'best', 'gain', 'high', 'up'
+        ]
+
+        # Negative indicators
+        negative_words = [
+            'bad', 'poor', 'weak', 'negative', 'decline', 'decrease', 'worse',
+            'worst', 'loss', 'unprofitable', 'pessimistic', 'concerned', 'bearish',
+            'disappointed', 'worried', 'low', 'down', 'fail', 'challenge', 'risk'
+        ]
+
+        positive_count = sum(1 for word in positive_words if word in context_lower)
+        negative_count = sum(1 for word in negative_words if word in context_lower)
+
+        if positive_count > negative_count:
+            return 'positive'
+        elif negative_count > positive_count:
+            return 'negative'
+        else:
+            return 'neutral'
+
 
 class BooleanMatcher:
     """Match complex boolean conditions (e.g., "if X happens, Y is likely")."""
