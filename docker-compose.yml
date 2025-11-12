@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: polymarket
+      POSTGRES_PASSWORD: polymarket_dev_password
+      POSTGRES_DB: polymarket_scanner
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U polymarket"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://polymarket:polymarket_dev_password@postgres:5432/polymarket_scanner
+      DEBUG: "True"
+      POLYMARKET_API_KEY: ${POLYMARKET_API_KEY:-}
+      SEC_EDGAR_API_KEY: ${SEC_EDGAR_API_KEY:-}
+      TRANSCRIPT_SERVICE_API_KEY: ${TRANSCRIPT_SERVICE_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: python main.py
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      REACT_APP_API_URL: http://localhost:8000/api
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+volumes:
+  postgres_data:
