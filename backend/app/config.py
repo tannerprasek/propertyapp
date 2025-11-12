@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
-        "postgresql://user:password@localhost:5432/polymarket_scanner"
+        "sqlite+aiosqlite:////tmp/polymarket.db"
     )
 
     # Server

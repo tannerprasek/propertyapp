@@ -12,16 +12,20 @@ logger = logging.getLogger(__name__)
 # Database URL
 DATABASE_URL = settings.DATABASE_URL
 
-# For async operations, we'll use asyncpg driver
-if DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
-
-# Create async engine
-engine = create_async_engine(
-    DATABASE_URL,
-    echo=settings.DEBUG,
-    pool_pre_ping=True,
-)
+# Create async engine (with SQLite optimizations)
+if "sqlite" in DATABASE_URL:
+    engine = create_async_engine(
+        DATABASE_URL,
+        echo=settings.DEBUG,
+        connect_args={"check_same_thread": False},
+    )
+else:
+    # PostgreSQL or other databases
+    engine = create_async_engine(
+        DATABASE_URL,
+        echo=settings.DEBUG,
+        pool_pre_ping=True,
+    )
 
 # Session factory
 async_session = sessionmaker(
