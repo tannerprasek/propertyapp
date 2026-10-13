@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>This Week's Meals</title>
+<style>
+  :root {
+    --bg: #f6f3ee; --card: #ffffff; --ink: #1f2420; --muted: #6b716c; --line: #e7e2da;
+    --accent: #2f6b4f; --accent-ink: #ffffff; --accent-soft: #e3efe8; --star: #e0a526;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151816; --card: #1f2321; --ink: #eef1ee; --muted: #9aa29c; --line: #2e3430;
+      --accent: #5fae86; --accent-ink: #0f1411; --accent-soft: #24352c; --star: #f0b93a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  header {
+    position: sticky; top: 0; z-index: 5; background: var(--bg);
+    padding: calc(env(safe-area-inset-top) + 12px) 16px 12px; border-bottom: 1px solid var(--line);
+  }
+  .top { display: flex; align-items: center; gap: 12px; max-width: 640px; margin: 0 auto; }
+  .top h1 { font-size: 20px; margin: 0; flex: 1; line-height: 1.2; }
+  .top h1 small { display: block; font-size: 13px; font-weight: 500; color: var(--muted); }
+  .export {
+    border: 0; border-radius: 12px; padding: 10px 14px; font: inherit; font-weight: 600; font-size: 15px;
+    background: var(--accent); color: var(--accent-ink); white-space: nowrap;
+  }
+  .export:disabled { opacity: .4; }
+  main { max-width: 640px; margin: 0 auto; padding: 12px 16px 48px; }
+  .banner {
+    background: var(--accent-soft); border-radius: 12px; padding: 10px 14px; margin-bottom: 12px; font-size: 15px;
+  }
+  .banner a { color: var(--accent); font-weight: 600; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px; margin-bottom: 14px;
+    overflow: hidden;
+  }
+  .card.in-list { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .actions { display: flex; align-items: center; gap: 8px; padding: 10px 12px; }
+  .add {
+    flex: 1; border: 1.5px solid var(--accent); border-radius: 10px; background: transparent; color: var(--accent);
+    font: inherit; font-weight: 600; font-size: 15px; padding: 8px 10px;
+  }
+  .in-list .add { background: var(--accent); color: var(--accent-ink); }
+  .star {
+    width: 44px; height: 40px; border: 1.5px solid var(--line); border-radius: 10px; background: transparent;
+    font-size: 22px; line-height: 1; color: var(--muted);
+  }
+  .star.on { color: var(--star); border-color: var(--star); }
+  .body { display: flex; gap: 12px; padding: 0 12px 12px; cursor: pointer; }
+  .thumb {
+    width: 96px; height: 96px; flex: none; border-radius: 12px; object-fit: cover; background: var(--accent-soft);
+    display: grid; place-items: center; font-size: 36px;
+  }
+  .title { font-size: 17px; font-weight: 650; margin: 2px 0 4px; line-height: 1.25; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .chev { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .details { display: none; padding: 0 14px 14px; border-top: 1px solid var(--line); }
+  .open .details { display: block; }
+  .details p { margin: 12px 0; }
+  .details h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
+  .details ul { margin: 0; padding-left: 20px; }
+  .details li { margin: 2px 0; }
+  .link { display: inline-block; margin-top: 12px; color: var(--accent); font-weight: 600; text-decoration: none; }
+  textarea {
+    width: 100%; min-height: 64px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px;
+    font: inherit; font-size: 16px; background: var(--bg); color: var(--ink); resize: vertical;
+  }
+  .saved { font-size: 12px; color: var(--muted); height: 16px; }
+  .empty { text-align: center; color: var(--muted); padding: 48px 0; }
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <h1>This Week's Meals<small id="sub"></small></h1>
+    <button class="export" id="export" disabled>Export list</button>
+  </div>
+</header>
+<main id="main"><div class="empty">Loading…</div></main>
+
+<script>
+const token = location.pathname.split("/").filter(Boolean)[1];
+const api = `/api/w/${token}`;
+let state = { recipes: [], week_of: "" };
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+async function load() {
+  const res = await fetch(api);
+  if (!res.ok) { document.getElementById("main").innerHTML = `<div class="empty">This link has expired.</div>`; return; }
+  state = await res.json();
+  render();
+}
+
+function render() {
+  const picked = state.recipes.filter(r => r.in_list).length;
+  document.getElementById("sub").textContent =
+    `Week of ${new Date(state.week_of + "T12:00").toLocaleDateString(undefined, {month: "short", day: "numeric"})} · ${picked} picked`;
+  const btn = document.getElementById("export");
+  btn.disabled = picked === 0;
+  btn.textContent = picked ? `Export list (${picked})` : "Export list";
+
+  const banner = state.newer_week
+    ? `<div class="banner">There's a newer week of recipes. <a href="/w/${esc(state.newer_week)}">See this week →</a></div>` : "";
+  document.getElementById("main").innerHTML = banner + state.recipes.map(card).join("");
+}
+
+function card(r) {
+  const thumb = r.image ? `<img class="thumb" src="${esc(r.image)}" alt="" loading="lazy">` : `<div class="thumb">🍽️</div>`;
+  const meta = [r.source, r.total_time, r.servings && `serves ${r.servings}`].filter(Boolean).map(esc).join(" · ");
+  return `
+  <article class="card ${r.in_list ? "in-list" : ""}" id="r${r.id}">
+    <div class="actions">
+      <button class="add" onclick="toggle(${r.id}, 'in_list')">${r.in_list ? "✓ On the list" : "+ Add to list"}</button>
+      <button class="star ${r.starred ? "on" : ""}" aria-label="Star" onclick="toggle(${r.id}, 'starred')">${r.starred ? "★" : "☆"}</button>
+    </div>
+    <div class="body" onclick="expand(${r.id})">
+      ${thumb}
+      <div>
+        <div class="title">${esc(r.title)}</div>
+        <div class="meta">${meta}</div>
+        <div class="chev">Tap for details</div>
+      </div>
+    </div>
+    <div class="details">
+      <p>${esc(r.description)}</p>
+      <h3>Ingredients</h3>
+      <ul>${r.ingredients.map(i => `<li>${esc(i)}</li>`).join("")}</ul>
+      <a class="link" href="${esc(r.url)}" target="_blank" rel="noopener">View full recipe ↗</a>
+      <h3>Notes</h3>
+      <textarea placeholder="How was it? Anything to change next time?" oninput="noteChanged(${r.id}, this.value)">${esc(r.comment)}</textarea>
+      <div class="saved" id="saved${r.id}"></div>
+    </div>
+  </article>`;
+}
+
+const openIds = new Set();
+function expand(id) {
+  const el = document.getElementById("r" + id);
+  el.classList.toggle("open");
+  el.classList.contains("open") ? openIds.add(id) : openIds.delete(id);
+}
+
+async function patch(id, body) {
+  const res = await fetch(`${api}/recipes/${id}`, {
+    method: "PATCH", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("save failed");
+  return res.json();
+}
+
+async function toggle(id, field) {
+  const r = state.recipes.find(x => x.id === id);
+  r[field] = !r[field];
+  rerenderKeepingOpen();
+  try { await patch(id, {[field]: r[field]}); }
+  catch { r[field] = !r[field]; rerenderKeepingOpen(); alert("Couldn't save — check your connection."); }
+}
+
+function rerenderKeepingOpen() {
+  render();
+  openIds.forEach(id => document.getElementById("r" + id)?.classList.add("open"));
+}
+
+const timers = {};
+function noteChanged(id, value) {
+  const r = state.recipes.find(x => x.id === id);
+  r.comment = value;
+  const label = document.getElementById("saved" + id);
+  label.textContent = "Saving…";
+  clearTimeout(timers[id]);
+  timers[id] = setTimeout(async () => {
+    try { await patch(id, {comment: value}); label.textContent = "Saved"; }
+    catch { label.textContent = "Couldn't save"; }
+  }, 700);
+}
+
+document.getElementById("export").addEventListener("click", async () => {
+  const res = await fetch(`/w/${token}/shopping-list.txt`);
+  const text = await res.text();
+  const filename = `shopping-list-${state.week_of}.txt`;
+  const file = new File([text], filename, {type: "text/plain"});
+  try {
+    if (navigator.canShare && navigator.canShare({files: [file]})) { await navigator.share({files: [file]}); return; }
+    if (navigator.share) { await navigator.share({title: "Shopping list", text}); return; }
+  } catch (e) { if (e.name === "AbortError") return; }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(file);
+  a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+});
+
+load();
+</script>
+</body>
+</html>
