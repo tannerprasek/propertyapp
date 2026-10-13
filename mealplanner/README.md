@@ -22,26 +22,31 @@ Picks, stars and notes are saved on the server, so the link keeps working all we
 
 Each Sunday the whole file goes to Claude along with every URL already suggested, so recipes don't repeat and picks improve over time.
 
-## Setup
+## Install on your Mac
+
+Needs Homebrew Python 3.10+ (`brew install python`) and Claude Code logged in with your Claude Max account (`claude` once, then `/login`).
 
 ```bash
-cd mealplanner
+git clone https://github.com/tannerprasek/propertyapp.git
+cd propertyapp && git checkout claude/weekly-meal-planner && cd mealplanner
 make setup          # creates .venv, installs deps, copies .env.example -> .env
-# edit .env: ANTHROPIC_API_KEY, SMTP_* (Gmail app password), EMAIL_TO, BASE_URL
-make preview        # finds recipes now, no email; prints the link
-make serve          # UI + Sunday scheduler in the foreground
-make install-mac    # or: run it in the background at login (launchd)
+open -e .env        # fill in SMTP_USER, SMTP_PASSWORD (Gmail app password), EMAIL_TO, BASE_URL
+make preview        # finds recipes now (takes a few minutes), no email; prints the link
+make install-mac    # runs in the background from now on, starts at login
 ```
+
+Recipes are found by running Claude Code headless (`claude -p`) on your Max login, so there's no API key or per-call bill. To use an API key instead, set `CLAUDE_BACKEND=api` and `ANTHROPIC_API_KEY` in `.env`.
 
 Other commands:
 
 ```bash
 make new-week       # find recipes + send the email right now
 make send-email     # re-send the latest week's email
-.venv/bin/python -m mealplanner prefs   # rebuild + print preferences.md
+make uninstall-mac  # stop the background service
+tail -f data/mealplanner.log
 ```
 
-If the Mac was asleep on Sunday morning, the app catches up and sends the week the next time it starts.
+If the Mac was asleep on Sunday morning, the app catches up and sends the week the next time it starts. Set the Mac to not sleep while plugged in (System Settings → Battery/Energy) if you want it on time.
 
 ## Reaching it from her phone
 

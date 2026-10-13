@@ -32,6 +32,9 @@ class Settings:
     email_from: str
     email_to: list[str]
     model: str
+    claude_backend: str
+    claude_cli: str
+    cli_model: str
 
     @property
     def db_path(self) -> Path:
@@ -68,6 +71,9 @@ def load_settings() -> Settings:
         email_from=_env("EMAIL_FROM") or _env("SMTP_USER"),
         email_to=[e.strip() for e in _env("EMAIL_TO").split(",") if e.strip()],
         model=_env("CLAUDE_MODEL", "claude-opus-5-5"),
+        claude_backend=_env("CLAUDE_BACKEND", "subscription").lower(),
+        claude_cli=_env("CLAUDE_CLI"),
+        cli_model=_env("CLAUDE_CLI_MODEL", "opus"),
     )
 
 

@@ -4,7 +4,11 @@ import hashlib
 import html
 import json
 import logging
+import os
 import re
+import shutil
+import subprocess
+from pathlib import Path
 
 import anthropic
 import httpx
@@ -63,6 +67,59 @@ def _week_prompt(count: int) -> str:
 
 
 def _ask_claude(count: int) -> list[dict]:
+    if settings.claude_backend == "api":
+        return _ask_claude_api(count)
+    return _ask_claude_cli(count)
+
+
+def _claude_cli_path() -> str:
+    if settings.claude_cli:
+        return settings.claude_cli
+    found = shutil.which("claude")
+    if found:
+        return found
+    # launchd starts with a bare PATH, so check the usual install locations too
+    for candidate in (
+        Path.home() / ".local/bin/claude",
+        Path.home() / ".claude/local/claude",
+        Path("/opt/homebrew/bin/claude"),
+        Path("/usr/local/bin/claude"),
+    ):
+        if candidate.exists():
+            return str(candidate)
+    raise RuntimeError("Claude Code CLI not found. Install it, run `claude` once to log in, or set CLAUDE_CLI.")
+
+
+def _ask_claude_cli(count: int) -> list[dict]:
+    """Runs Claude Code headless so the search bills to the logged-in Claude subscription."""
+    env = dict(os.environ)
+    # An API key in the environment would take precedence over the subscription login
+    env.pop("ANTHROPIC_API_KEY", None)
+    env.pop("ANTHROPIC_AUTH_TOKEN", None)
+    cmd = [
+        _claude_cli_path(), "-p",
+        "--output-format", "json",
+        "--model", settings.cli_model,
+        "--system-prompt", SYSTEM_PROMPT,
+        "--tools", "WebSearch,WebFetch",
+        "--allowedTools", "WebSearch,WebFetch",
+        "--strict-mcp-config",
+        "--no-session-persistence",
+    ]
+    proc = subprocess.run(
+        cmd, input=_week_prompt(count), capture_output=True, text=True,
+        env=env, cwd=settings.data_dir, timeout=45 * 60,
+    )
+    try:
+        result = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        raise RuntimeError(f"Claude Code failed (exit {proc.returncode}): {proc.stderr.strip() or proc.stdout[:500]}")
+    if result.get("is_error"):
+        raise RuntimeError(f"Claude Code error: {result.get('result') or result.get('subtype')}")
+    return _parse_json_array(result.get("result", ""))
+
+
+def _ask_claude_api(count: int) -> list[dict]:
     client = anthropic.Anthropic()
     tools = [
         {"type": "web_search_20260209", "name": "web_search", "max_uses": 20},
