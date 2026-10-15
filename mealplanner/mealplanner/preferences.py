@@ -25,7 +25,7 @@ def _household_notes() -> str:
     path = settings.preferences_path
     if not path.exists():
         return DEFAULT_NOTES
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     return text.split(AUTO_MARKER, 1)[0] if AUTO_MARKER in text else text
 
 
@@ -56,13 +56,13 @@ def rebuild() -> None:
         "- (none yet)"
     ]
 
-    settings.preferences_path.write_text(_household_notes().rstrip() + "\n\n" + "\n".join(lines) + "\n")
+    settings.preferences_path.write_text(_household_notes().rstrip() + "\n\n" + "\n".join(lines) + "\n", encoding="utf-8")
 
 
 def read() -> str:
     if not settings.preferences_path.exists():
         rebuild()
-    return settings.preferences_path.read_text()
+    return settings.preferences_path.read_text(encoding="utf-8")
 
 
 def previously_suggested_urls() -> list[str]:

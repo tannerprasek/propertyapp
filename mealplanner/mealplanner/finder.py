@@ -78,10 +78,14 @@ def _claude_cli_path() -> str:
     found = shutil.which("claude")
     if found:
         return found
-    # launchd starts with a bare PATH, so check the usual install locations too
+    # launchd / Windows startup items may not have the user's full PATH, so check the usual install locations too
+    home = Path.home()
+    appdata = Path(os.environ.get("APPDATA", home / "AppData/Roaming"))
     for candidate in (
-        Path.home() / ".local/bin/claude",
-        Path.home() / ".claude/local/claude",
+        home / ".local/bin/claude",
+        home / ".local/bin/claude.exe",
+        home / ".claude/local/claude",
+        appdata / "npm/claude.cmd",
         Path("/opt/homebrew/bin/claude"),
         Path("/usr/local/bin/claude"),
     ):
@@ -96,19 +100,24 @@ def _ask_claude_cli(count: int) -> list[dict]:
     # An API key in the environment would take precedence over the subscription login
     env.pop("ANTHROPIC_API_KEY", None)
     env.pop("ANTHROPIC_AUTH_TOKEN", None)
+    prompt_file = settings.data_dir / "system_prompt.txt"
+    prompt_file.write_text(SYSTEM_PROMPT, encoding="utf-8")
     cmd = [
         _claude_cli_path(), "-p",
         "--output-format", "json",
         "--model", settings.cli_model,
-        "--system-prompt", SYSTEM_PROMPT,
+        # A file avoids multi-line arguments, which Windows .cmd shims mangle
+        "--system-prompt-file", str(prompt_file),
         "--tools", "WebSearch,WebFetch",
         "--allowedTools", "WebSearch,WebFetch",
         "--strict-mcp-config",
         "--no-session-persistence",
     ]
     proc = subprocess.run(
-        cmd, input=_week_prompt(count), capture_output=True, text=True,
+        cmd, input=_week_prompt(count), capture_output=True, text=True, encoding="utf-8",
         env=env, cwd=settings.data_dir, timeout=45 * 60,
+        # Don't flash a console window when running as a hidden Windows startup item
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     try:
         result = json.loads(proc.stdout)

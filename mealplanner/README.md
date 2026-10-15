@@ -48,11 +48,35 @@ tail -f data/mealplanner.log
 
 If the Mac was asleep on Sunday morning, the app catches up and sends the week the next time it starts. Set the Mac to not sleep while plugged in (System Settings → Battery/Energy) if you want it on time.
 
+## Install on Windows
+
+Needs about 10 GB free disk space. In PowerShell:
+
+```powershell
+winget install -e --id Git.Git
+winget install -e --id Python.Python.3.12
+irm https://claude.ai/install.ps1 | iex
+```
+
+Open a new PowerShell window, run `claude`, type `/login` and sign in with your Max account, then `/exit`. Then:
+
+```powershell
+git clone https://github.com/tannerprasek/propertyapp.git
+cd propertyapp\mealplanner
+git checkout claude/weekly-meal-planner
+.\mealplanner setup
+notepad .env
+.\mealplanner preview
+.\mealplanner install
+```
+
+`install` starts it hidden in the background and adds it to your Startup folder so it runs at every login. Other commands: `.\mealplanner status`, `new-week`, `send-email`, `uninstall`. If Windows Firewall asks about Python, allow it on Private networks so her phone can connect.
+
 ## Reaching it from her phone
 
 `BASE_URL` in `.env` is the address the email links to.
 
-- **Home Wi-Fi only**: `BASE_URL=http://<your-mac-name>.local:8765`
+- **Home Wi-Fi only**: `BASE_URL=http://<your-mac-name>.local:8765` on a Mac, or `http://<pc-ip-address>:8765` on Windows (`setup` fills this in)
 - **Anywhere** (recommended): [Tailscale](https://tailscale.com) on the Mac and her phone, then `tailscale serve --bg 8765` and set `BASE_URL` to the `https://<mac>.<tailnet>.ts.net` address it prints. HTTPS also turns on the iPhone share sheet, so "Export list" can go straight to Notes.
 
 ## Layout
