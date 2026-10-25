@@ -1,0 +1,13 @@
+{
+  "id": "com.local.wyzepip",
+  "version": "1.0.0",
+  "vendor": "local",
+  "type": "web",
+  "main": "index.html",
+  "title": "Wyze PiP",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "resolution": "1920x1080",
+  "transparent": true,
+  "disableBackHistoryAPI": true
+}

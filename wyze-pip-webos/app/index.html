@@ -1,0 +1,228 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Wyze PiP</title>
+<style>
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: transparent; font-family: sans-serif; color: #fff; }
+  #tv { position: absolute; inset: 0; width: 1920px; height: 1080px; object-fit: contain; background: #000; display: none; }
+  #pip { position: absolute; background: #000; border: 3px solid rgba(255,255,255,.85); border-radius: 10px; overflow: hidden;
+         box-shadow: 0 8px 30px rgba(0,0,0,.6); transition: all .2s ease; }
+  #pip video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #label { position: absolute; left: 10px; top: 8px; font-size: 22px; background: rgba(0,0,0,.55); padding: 2px 10px; border-radius: 6px; }
+  #status { position: absolute; left: 0; right: 0; bottom: 0; font-size: 20px; padding: 6px 10px; background: rgba(0,0,0,.6); display: none; }
+  #settings { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 1100px; background: #15181f; border-radius: 16px;
+              padding: 36px 44px; box-shadow: 0 20px 60px rgba(0,0,0,.8); display: none; }
+  #settings h1 { margin: 0 0 18px; font-size: 40px; }
+  #settings label { display: block; font-size: 24px; margin: 18px 0 6px; color: #bbb; }
+  #settings textarea, #settings select { width: 100%; box-sizing: border-box; font-size: 26px; padding: 12px; background: #0c0e12; color: #fff;
+              border: 2px solid #333; border-radius: 8px; }
+  #settings textarea { height: 170px; }
+  #settings .focus, #settings textarea:focus, #settings select:focus { border-color: #00c88c; outline: none; }
+  #settings button { margin-top: 24px; font-size: 28px; padding: 12px 36px; border-radius: 8px; border: 2px solid #333; background: #222; color: #fff; }
+  #settings button:focus { border-color: #00c88c; background: #00c88c; color: #000; outline: none; }
+  #help { font-size: 20px; color: #888; margin-top: 18px; line-height: 1.5; }
+  #toast { position: absolute; left: 50%; top: 40px; transform: translateX(-50%); background: rgba(0,0,0,.75); padding: 10px 24px; border-radius: 8px;
+           font-size: 26px; display: none; }
+</style>
+</head>
+<body>
+<video id="tv" autoplay muted></video>
+
+<div id="pip">
+  <video id="cam" autoplay muted playsinline></video>
+  <div id="label"></div>
+  <div id="status"></div>
+</div>
+
+<div id="settings">
+  <h1>Wyze PiP Settings</h1>
+  <label for="urls">Camera stream URLs (one per line, optional "Name | URL")</label>
+  <textarea id="urls" placeholder="Front Door | http://192.168.1.50:8888/front-door/index.m3u8"></textarea>
+  <label for="bg">Background</label>
+  <select id="bg">
+    <option value="none">None (transparent)</option>
+    <option value="tv://">Live TV tuner</option>
+    <option value="ext://hdmi:1">HDMI 1</option>
+    <option value="ext://hdmi:2">HDMI 2</option>
+    <option value="ext://hdmi:3">HDMI 3</option>
+    <option value="ext://hdmi:4">HDMI 4</option>
+  </select>
+  <button id="save">Save</button>
+  <div id="help">
+    Remote: <b>Arrows</b> move PiP to a corner · <b>OK</b> next camera · <b>CH+/CH−</b> resize ·
+    <b>Green</b> PiP fullscreen toggle · <b>Yellow</b> hide/show PiP · <b>Red</b> settings · <b>Back</b> exit
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="hls.min.js"></script>
+<script>
+(function () {
+  var K = { LEFT: 37, UP: 38, RIGHT: 39, DOWN: 40, OK: 13, BACK: 461, RED: 403, GREEN: 404, YELLOW: 405, BLUE: 406, CHUP: 33, CHDN: 34, PLUS: 107, MINUS: 109 };
+  var SIZES = [[384, 216], [480, 270], [640, 360], [800, 450], [960, 540]];
+  var MARGIN = 40;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var pip = $('pip'), cam = $('cam'), tv = $('tv'), label = $('label'), status = $('status');
+  var settings = $('settings'), urlsEl = $('urls'), bgEl = $('bg');
+
+  function load(k, d) { try { var v = localStorage.getItem('wpip.' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
+  function save(k, v) { try { localStorage.setItem('wpip.' + k, JSON.stringify(v)); } catch (e) {} }
+
+  var state = {
+    cams: load('cams', []),
+    idx: load('idx', 0),
+    corner: load('corner', 'br'),   // tl tr bl br
+    size: load('size', 1),
+    bg: load('bg', 'none'),
+    full: false,
+    hidden: false
+  };
+  var hls = null, retryTimer = null;
+
+  function toast(msg) {
+    var t = $('toast'); t.textContent = msg; t.style.display = 'block';
+    clearTimeout(toast._t); toast._t = setTimeout(function () { t.style.display = 'none'; }, 1800);
+  }
+  function setStatus(msg) { status.textContent = msg || ''; status.style.display = msg ? 'block' : 'none'; }
+
+  function layout() {
+    pip.style.display = state.hidden ? 'none' : 'block';
+    if (state.full) {
+      pip.style.left = '0px'; pip.style.top = '0px'; pip.style.width = '1920px'; pip.style.height = '1080px';
+      pip.style.borderRadius = '0'; pip.style.borderWidth = '0';
+      return;
+    }
+    var s = SIZES[state.size];
+    pip.style.width = s[0] + 'px'; pip.style.height = s[1] + 'px';
+    pip.style.borderRadius = '10px'; pip.style.borderWidth = '3px';
+    pip.style.left = (state.corner[1] === 'l' ? MARGIN : 1920 - s[0] - MARGIN) + 'px';
+    pip.style.top = (state.corner[0] === 't' ? MARGIN : 1080 - s[1] - MARGIN) + 'px';
+  }
+
+  function parseCams(text) {
+    return text.split('\n').map(function (l) { return l.trim(); }).filter(Boolean).map(function (l, i) {
+      var p = l.split('|');
+      return p.length > 1 ? { name: p[0].trim(), url: p.slice(1).join('|').trim() } : { name: 'Camera ' + (i + 1), url: l };
+    });
+  }
+
+  function stopCam() {
+    clearTimeout(retryTimer);
+    if (hls) { hls.destroy(); hls = null; }
+    cam.removeAttribute('src'); cam.load();
+  }
+
+  function playCam() {
+    stopCam();
+    if (!state.cams.length) { label.textContent = ''; setStatus('Press RED to add a camera URL'); return; }
+    if (state.idx >= state.cams.length) state.idx = 0;
+    var c = state.cams[state.idx];
+    label.textContent = c.name;
+    setStatus('Connecting…');
+
+    var retry = function (why) {
+      setStatus(why + ' — retrying…');
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(playCam, 4000);
+    };
+
+    if (/\.m3u8(\?|$)/i.test(c.url) && window.Hls && Hls.isSupported()) {
+      hls = new Hls({ lowLatencyMode: true, liveSyncDurationCount: 2, maxBufferLength: 6 });
+      hls.on(Hls.Events.MANIFEST_PARSED, function () { cam.play(); });
+      hls.on(Hls.Events.ERROR, function (e, d) { if (d.fatal) retry('Stream error'); });
+      hls.loadSource(c.url);
+      hls.attachMedia(cam);
+    } else {
+      cam.src = c.url;
+      cam.onerror = function () { retry('Stream error'); };
+      cam.play();
+    }
+    cam.onplaying = function () { setStatus(''); };
+    cam.onstalled = function () { retry('Stalled'); };
+  }
+
+  function applyBg() {
+    tv.pause(); tv.removeAttribute('src'); tv.innerHTML = '';
+    if (state.bg === 'none') { tv.style.display = 'none'; return; }
+    var src = document.createElement('source');
+    src.src = state.bg;
+    src.type = state.bg.indexOf('tv://') === 0 ? 'service/webos-broadcast' : 'service/webos-external';
+    tv.appendChild(src);
+    tv.style.display = 'block';
+    tv.load(); tv.play();
+  }
+
+  function openSettings() {
+    urlsEl.value = state.cams.map(function (c) { return c.name + ' | ' + c.url; }).join('\n');
+    bgEl.value = state.bg;
+    settings.style.display = 'block';
+    urlsEl.focus();
+  }
+  function closeSettings(apply) {
+    if (apply) {
+      state.cams = parseCams(urlsEl.value); state.idx = 0; state.bg = bgEl.value;
+      save('cams', state.cams); save('idx', 0); save('bg', state.bg);
+      applyBg(); playCam();
+    }
+    settings.style.display = 'none';
+    document.activeElement && document.activeElement.blur();
+  }
+  $('save').addEventListener('click', function () { closeSettings(true); });
+
+  function moveCorner(dir) {
+    var v = state.corner[0], h = state.corner[1];
+    if (dir === K.UP) v = 't'; if (dir === K.DOWN) v = 'b';
+    if (dir === K.LEFT) h = 'l'; if (dir === K.RIGHT) h = 'r';
+    state.corner = v + h; save('corner', state.corner); layout();
+  }
+
+  document.addEventListener('keydown', function (e) {
+    var k = e.keyCode;
+    if (settings.style.display === 'block') {
+      if (k === K.BACK || k === K.RED) { e.preventDefault(); closeSettings(false); return; }
+      var order = [urlsEl, bgEl, $('save')], i = order.indexOf(document.activeElement);
+      if (k === K.DOWN && document.activeElement !== bgEl && (document.activeElement !== urlsEl || urlsEl.selectionEnd === urlsEl.value.length)) {
+        e.preventDefault(); order[Math.min(i + 1, order.length - 1)].focus();
+      } else if (k === K.UP && document.activeElement !== bgEl && (document.activeElement !== urlsEl || urlsEl.selectionStart === 0)) {
+        e.preventDefault(); order[Math.max(i - 1, 0)].focus();
+      }
+      return;
+    }
+    switch (k) {
+      case K.UP: case K.DOWN: case K.LEFT: case K.RIGHT:
+        if (!state.full) moveCorner(k); break;
+      case K.OK:
+        if (state.cams.length > 1) { state.idx = (state.idx + 1) % state.cams.length; save('idx', state.idx); playCam(); toast(state.cams[state.idx].name); }
+        break;
+      case K.CHUP: case K.PLUS:
+        state.size = Math.min(state.size + 1, SIZES.length - 1); save('size', state.size); layout(); break;
+      case K.CHDN: case K.MINUS:
+        state.size = Math.max(state.size - 1, 0); save('size', state.size); layout(); break;
+      case K.GREEN: state.full = !state.full; layout(); break;
+      case K.YELLOW: state.hidden = !state.hidden; layout(); break;
+      case K.RED: openSettings(); break;
+      case K.BACK:
+        e.preventDefault();
+        if (state.full) { state.full = false; layout(); }
+        else if (window.webOS && webOS.platformBack) webOS.platformBack();
+        else window.close();
+        break;
+      default: return;
+    }
+    e.preventDefault();
+  });
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) stopCam(); else playCam();
+  });
+
+  layout();
+  applyBg();
+  if (!state.cams.length) openSettings(); else playCam();
+})();
+</script>
+</body>
+</html>

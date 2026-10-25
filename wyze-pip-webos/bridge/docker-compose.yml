@@ -1,0 +1,18 @@
+# Runs on any always-on machine on your LAN (PC, NAS, Raspberry Pi).
+# Converts your Wyze cameras into local HLS streams the TV app can play.
+services:
+  wyze-bridge:
+    image: mrlt8/wyze-bridge:latest
+    container_name: wyze-bridge
+    restart: unless-stopped
+    ports:
+      - 8888:8888   # HLS  -> http://<host>:8888/<camera-name>/index.m3u8
+      - 8554:8554   # RTSP
+      - 5000:5000   # Web UI
+    environment:
+      - WYZE_EMAIL=you@example.com
+      - WYZE_PASSWORD=yourpassword
+      - API_ID=your-wyze-api-id        # from https://developer-api-console.wyze.com
+      - API_KEY=your-wyze-api-key
+      - WB_AUTH=False
+      - LLHLS=True                      # low-latency HLS
